@@ -1,0 +1,18 @@
+expo init tinder-clone
+yarn add twrnc
+yarn add @react-navigation/native //read docs
+yarn add @react-navigation/native-stack //we are using native stack navigator instead stack navigator
+expo install expo-auth-session expo-random
+expo fetch:android:hashes //configurar firebase
+expo build:android //gerar uma build para poder configurar as keys
+expo fetch:android:hashes //mandar este comando de novo depois da build para pegar a key
+yarn add expo-google-app-auth //depreceated
+expo install firebase //se der pau no yarn start do ios instalar a versao firebase@9.6.11
+yarn add react-native-deck-swiper
+
+
+[information]
+flex box is row for default, but in react native the default is collumn
+
+[commands]
+expo r -c //cache clean
