@@ -1,5 +1,6 @@
+/* eslint-disable no-shadow */
 import { useNavigation } from '@react-navigation/native';
-import React, { useRef } from 'react';
+import React, { useRef, useState, useLayoutEffect, useEffect } from 'react';
 import {
   View,
   Text,
@@ -11,7 +12,20 @@ import tw from 'twrnc';
 // eslint-disable-next-line import/no-extraneous-dependencies
 import { AntDesign, Entypo, Ionicons } from '@expo/vector-icons';
 import Swiper from 'react-native-deck-swiper';
+import {
+  collection,
+  doc,
+  onSnapshot,
+  setDoc,
+  getDocs,
+  query,
+  where,
+  getDoc,
+  serverTimestamp,
+} from 'firebase/firestore';
+import { db } from '../firebase';
 import useAuth from '../hooks/useAuth';
+import generateId from '../lib/generateId';
 
 const DUMMY_DATA = [
   {
@@ -36,7 +50,115 @@ const DUMMY_DATA = [
 const HomeScreen = () => {
   const navigation = useNavigation();
   const { user, logout } = useAuth();
+  const [profiles, setProfiles] = useState([]);
   const swiperRef = useRef(null);
+
+  // onSnapshot returns unsubscribe, so  used anoymous function to return. other way to do that is return unsub();
+  useLayoutEffect(
+    () =>
+      onSnapshot(doc(db, 'users', user.uid), (snapshot) => {
+        if (!snapshot.exists()) {
+          navigation.navigate('Modal');
+        }
+      }),
+    []
+  );
+
+  useEffect(() => {
+    let unsub;
+
+    const fetchCards = async () => {
+      const passes = await getDocs(
+        collection(db, 'users', user.uid, 'passes')
+      ).then((snapshot) => snapshot.docs.map((doc) => doc.id));
+
+      const swipes = await getDocs(
+        collection(db, 'users', user.uid, 'swipes')
+      ).then((snapshot) => snapshot.docs.map((doc) => doc.id));
+
+      const passedUserIds = passes.length > 0 ? passes : ['test'];
+      const swipedUserIds = swipes.length > 0 ? swipes : ['test'];
+
+      unsub = onSnapshot(
+        query(
+          collection(db, 'users'),
+          where('id', 'not-in', [...passedUserIds, ...swipedUserIds])
+        ),
+        (snapshot) => {
+          setProfiles(
+            snapshot.docs
+              .filter((doc) => doc.id !== user.uid)
+              .map((doc) => ({
+                id: doc.id,
+                ...doc.data(),
+              }))
+          );
+        }
+      );
+    };
+
+    fetchCards();
+    return unsub;
+  }, [db]);
+
+  const swipeLeft = async (cardIndex) => {
+    if (!profiles[cardIndex]) return;
+
+    const userSwiped = profiles[cardIndex];
+    console.log(`You swiped PASS on ${userSwiped.displayName}`);
+
+    setDoc(doc(db, 'users', user.uid, 'passes', userSwiped.id), userSwiped);
+  };
+
+  const swipeRight = async (cardIndex) => {
+    console.log('SwipeRight');
+    if (!profiles[cardIndex]) return;
+
+    const userSwiped = profiles[cardIndex];
+    const loggedInProfile = await (
+      await getDoc(doc(db, 'users', user.uid))
+    ).data();
+
+    // Check if t he user swiped on you
+    getDoc(doc(db, 'users', userSwiped.id, 'swipes', user.uid)).then(
+      (documentSnapshot) => {
+        if (documentSnapshot.exists()) {
+          // user has matched with you before you matched with them...
+          console.log(`Hooray, You MATCHED with ${userSwiped.displayName} `);
+
+          setDoc(
+            doc(db, 'users', user.uid, 'swipes', userSwiped.id),
+            userSwiped
+          );
+
+          // Create a MATCH!
+          setDoc(doc(db, 'matches', generateId(user.uid, userSwiped.id)), {
+            users: {
+              [user.uid]: loggedInProfile,
+              [userSwiped.id]: userSwiped,
+            },
+            usersMatched: [user.uid, userSwiped.id],
+            timeStamp: serverTimestamp(),
+          });
+
+          navigation.navigate('Match', {
+            loggedInProfile,
+            userSwiped,
+          });
+        } else {
+          // User has swiped as first interaction between the two...
+          console.log(`You swiped on ${userSwiped.displayName}`);
+          setDoc(
+            doc(db, 'users', user.uid, 'swipes', userSwiped.id),
+            userSwiped
+          );
+        }
+      }
+    );
+
+    console.log(`You swiped on ${userSwiped.displayName}`);
+    setDoc(doc(db, 'users', user.uid, 'swipes', userSwiped.id), userSwiped);
+  };
 
   return (
     <SafeAreaView style={tw`flex-1`}>
@@ -67,16 +189,16 @@ const HomeScreen = () => {
         <Swiper
           ref={swiperRef}
           containerStyle={{ backgroundColor: 'transparent' }}
-          cards={DUMMY_DATA}
+          cards={profiles}
           stackSize={5}
           cardIndex={0}
           animateCardOpacity
           verticalSwipe={false}
-          onSwipedLeft={() => {
-            console.log('Swipe Pass');
+          onSwipedLeft={(cardIndex) => {
+            swipeLeft(cardIndex);
           }}
-          onSwipedRight={() => {
-            console.log('Swipe MATCH');
+          onSwipedRight={(cardIndex) => {
+            swipeRight(cardIndex);
           }}
           backgroundColor="#4FD0E9"
           overlayLabels={{
@@ -99,26 +221,44 @@ const HomeScreen = () => {
               },
             },
           }}
-          renderCard={(card) => (
-            <View key={card.id} style={tw`bg-white h-3/4 rounded-xl relative`}>
-              <Image
-                style={tw`h-full w-full rounded-xl absolute`}
-                source={{ uri: card.photoURL }}
-              />
-
+          renderCard={(card) =>
+            card ? (
               <View
-                style={tw`absolute bottom-0 bg-white w-full h-20 flex-row justify-between items-center px-6 py-2 rounded-b-xl shadow-xl`}
+                key={card.id}
+                style={tw`bg-white h-3/4 rounded-xl relative`}
               >
-                <View>
-                  <Text style={tw`text-xl font-bold`}>
-                    {card.firstName} {card.lastName}
-                  </Text>
-                  <Text>{card.job}</Text>
+                <Image
+                  style={tw`h-full w-full rounded-xl absolute`}
+                  source={{ uri: card.photoURL }}
+                />
+
+                <View
+                  style={tw`absolute bottom-0 bg-white w-full h-20 flex-row justify-between items-center px-6 py-2 rounded-b-xl shadow-xl`}
+                >
+                  <View>
+                    <Text style={tw`text-xl font-bold`}>
+                      {card.displayName}
+                    </Text>
+                    <Text>{card.job}</Text>
+                  </View>
+                  <Text style={tw`text-2xl font-bold`}>{card.age}</Text>
                 </View>
-                <Text style={tw`text-2xl font-bold`}>{card.age}</Text>
               </View>
-            </View>
-          )}
+            ) : (
+              <View
+                style={tw`relative bg-white h-3/4 rounded-xl justify-center items-center shadow-xl`}
+              >
+                <Text style={tw`font-bold pb-5`}>No more profiles</Text>
+
+                <Image
+                  style={tw`h-20 w-full`}
+                  height={100}
+                  width={100}
+                  source={{ uri: 'https://links.papareact.com/6gb' }}
+                />
+              </View>
+            )
+          }
         />
       </View>
 
