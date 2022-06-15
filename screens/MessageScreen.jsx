@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
   View,
-  Text,
   SafeAreaView,
   TextInput,
   Button,
@@ -48,7 +47,7 @@ const MessageScreen = () => {
             snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
           )
       ),
-    [matchDetails, db]
+    [matchDetails]
   );
 
   const sendMessage = () => {
